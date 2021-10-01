@@ -91,7 +91,7 @@ source ~/.bashrc
 
 ### Create Blob Storage
 
-Now that the environment variables have been set, we can create the storage account. This can be performed manually, byt we will use the helper script provided.
+Now that the environment variables have been set, we can create the storage account. This can be performed manually, but we will use the helper script provided.
 
 We must first install the [Azure Command Line Interface](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli). At the time of writing this could be done using the following single command:
 
@@ -111,15 +111,19 @@ We can deploy the required resources using:
 ./create-azure-sa.sh create_sa
 ```
 
-This command will write out the `AZURE_STORAGE_ACCESS_KEY` export command to add to your environment. It is also possible to retrieve this later by either re-running the command above, or through the azure portal. The command will only create the resources when it does not find them present with the same name. It is worth updating this environment variable in your shell configuration `~/.bashrc` and reloading them.
+This command will write out the `AZURE_STORAGE_ACCESS_KEY` export command to add to your environment. It is also possible to retrieve this later by either re-running the command above, or through the azure portal. The command will only create the resources when it does not find them present with the same name. It is worth updating the `AZURE_STORAGE_ACCESS_KEY` environment variable in your shell configuration `~/.bashrc` and reloading.
 
 ```bash
 source ~/.bashrc
 ```
 
-### Install Docker
+### Install Dependencies
 
-Most configuration is now complete, and so we must install Docker. The following is an excerpt of the commands used. Up-to-date installation instructions can be found [here](https://docs.docker.com/engine/install/ubuntu/).
+The deployment scripts rely on Docker and Docker Compose and so these must also be installed and configured on the tracking VM.
+
+#### Install Docker
+
+Most configuration is now complete, and so we must install Docker. The following is an excerpt of the commands used. Up to date installation instructions can be found [here](https://docs.docker.com/engine/install/ubuntu/).
 
 > ##### Set up the repository
 > 1. Update the apt package index and install packages to allow apt to use a repository over HTTPS:
@@ -164,6 +168,32 @@ Most configuration is now complete, and so we must install Docker. The following
 >  newgrp docker 
 > ```
 
+#### Install Docker Compose
+
+Up to date instructions can be found [here](https://docs.docker.com/compose/install/). The following commands were accurate at the time of writing.
+
+> Run this command to download the current stable release of Docker Compose:
+>
+> ```bash
+> sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+> ```
+> To install a different version of Compose, substitute 1.29.2 with the version of Compose you want to use.
+>
+> If you have problems installing with curl, see Alternative Install Options tab above.
+>
+> Apply executable permissions to the binary:
+>
+>```bash
+> sudo chmod +x /usr/local/bin/docker-compose
+> ```
+<!-- > Note: If the command docker-compose fails after installation, check your path. You can also create a symbolic link to /usr/bin or any other directory in your path.
+>
+> For example:
+>
+> ```bash
+> sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+> ``` -->
+
 ### Run the Server
 
 Once we have docker running and all of the required environment variables in the shell, we can test deploying the resources. All of the required configuration is provided within the [docker-compose.yaml](https://github.com/adam-cattermole/mlflow-docker-azure/blob/main/docker-compose.yml) file, extracting the values set in the environment.
@@ -182,6 +212,10 @@ This:
 
 ### Expose the server
 
+We need to expose the VM on port `443` so that we can access it via `HTTPS`. This can easily be done through azure portal, navigating through: VM -> Networking -> Inbound port rules -> Add inbound port rule
+
+* *image of the networking rules in the dashboard*
+* *image of the rule itself and settings*
 
 ## Running our first Model
 
@@ -189,17 +223,35 @@ This:
 * Talk through instrumenting the code
 
 
+### Dependencies on the running machine
+
+* python
+* mlflow
+* azure-storage-blob
+* paramiko??
+* env variables
+
+#### Configure Project
+
+To set up a project in mlflow we need to create the MLproject file. This can be used to define operating conditions and
+
 Run the model:
 
 ```bash
 mlflow run ...
 ```
-  
+
+
 
 
 Note that whilst the MLflow model is stored remotely in the tracking server, the execution of the model is performed on the local calling machine, wrapped by requests to the tracking server as well as direct interaction with the artifact store. In some cases it may be beneficial to deploy the code to a remote server, especially when leveraging a GPU-enabled machine.
 
 ### Using Docker for Remote Model Deployment
+
+#### Updating the Configuration
+
+* add docker_env to MLproject file
+* expose env username/password
 
 A simple workaround is to provide the `DOCKER_HOST` environment variable exported to your shell. Docker automatically uses this variable for all docker-related commands.
 
@@ -214,3 +266,11 @@ mlflow run . -A gpus=all
 ```
 
 ## Conclusion
+
+
+
+## Notes
+
+* docker-compose
+* paramiko
+* azure-storage-blob
