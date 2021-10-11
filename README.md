@@ -2,6 +2,8 @@
 
 In this blog post we aim to introduce MLflow, deploy on Azure using docker-compose, and run a simple instrumented example model.
 
+<ins>***TODO: THIS IS CURRENTLY UNTESTED END-TO-END***</ins>
+
 ## Why MLflow
 
 _TODO_
@@ -221,7 +223,7 @@ Once this route has been exposed, you should be able to access the dashboard thr
 
 https://mlflow-tracking.eastus.cloudapp.azure.com
 
-The login credentials are the values you set using `configure-env.sh`, `MLFLOW_TRACKING_USERNAME`  and `MLFLOW_TRACKING_PASSWORD`.
+The login credentials are the values you set using `configure-env.sh` - `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD`.
 
 ## Running our first Model
 
@@ -428,18 +430,75 @@ mlflow run . -e train_new -P alpha=<alpha> -P l1_ratio=<l1_ratio>
 
 ### Using Docker for Remote Model Deployment
 
-#### Updating the Configuration
+When using mlflow we decided it would be useful to deploy our models to a remote machine, especially in the case where the model relies on GPU's to perform well. In this case we leverage Docker, with a remote machine using a GPU.
 
-* add docker_env to MLproject file
-* expose env username/password
+First off we must deploy a VM in Azure, setting an appropriate DNS name. We selected `mlflow-training.eastus.cloudapp.azure.com` for the training VM with a GPU and deployed it with the [Azure Data Science Virtual Machine image](https://azure.microsoft.com/en-gb/services/virtual-machines/data-science-virtual-machines/#product-overview) (DSVM). Docker must also be installed in the same way as for the training VM - follow the steps above (docker-compose is NOT needed however).
 
-A simple workaround is to provide the `DOCKER_HOST` environment variable exported to your shell. Docker automatically uses this variable for all docker-related commands.
+We can then configure our local machine to use this VM for all Docker commands by setting the `DOCKER_HOST` environment variable. The calling machine must have SSH access to the VM. The only prequisite is to install the `paramiko` python package (and Docker must be callable from the local machine):
+
+```bash
+pip install paramiko
+```
+
+Set the environment variable:
 
 ```bash
 export DOCKER_HOST="ssh://azureuser@mlflow-training.eastus.cloudapp.azure.com
 ```
 
-As MLflow uses the docker command directly underneath, setting this variable ensures that an MLflow Docker run will be performed on the remote training machine we have configured.
+#### Creating a Dockerfile
+
+To deploy to our model to the GPU-enabled VM, we must first create a docker container. To do this we must leverage CUDA - we used the same version of CUDA that was installed on our VM (11.1.1). We also matched the cudNN package to the version we had installed on the VM. The resulting Dockerfile looked similar to below:
+
+<ins>***TODO: THIS DOCKERFILE IS UNTESTED***</ins>
+
+```Dockerfile
+FROM nvidia/cuda:11.1.1-cudnn8-runtime-ubuntu20.04
+
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-distutils \
+    && apt-get install -y --allow-change-held-packages libcudnn8=8.1.0.77-1+cuda11.2 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY train.py ./
+
+RUN pip install \
+    mlflow \
+    scikit-learn \
+    azure-storage-blob
+```
+
+We can test that building this image works as intended:
+
+```bash
+docker build -t train:latest .
+```
+
+This will have built the image on our remote VM!
+
+#### Updating the Configuration
+
+We must update our MLproject file to specify some docker environment options. We point mlflow to our docker image named 'train'. We also provide the `environment` option, telling mlflow to copy the values of `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` into the Docker container.
+
+```yaml
+name: tutorial
+
+docker_env:
+  image: train
+  environment: ["MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"]
+
+entry_points:
+  main:
+    parameters:
+      alpha: {type: float, default: 0.5}
+      l1_ratio: {type: float, default: 0.1}
+    command: "python train.py {alpha} {l1_ratio}"
+```
+
+Mlflow directly calls docker when called with a `docker_env`, and so as we have set `DOCKER_HOST`, the execution will take place on the remote machine. We can therefore run the default experiment with the following command (the `-A gpus=all` ensures the GPU's are passed through to the Docker container):
 
 ```bash
 mlflow run . -A gpus=all
