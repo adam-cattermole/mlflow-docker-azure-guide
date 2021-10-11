@@ -70,16 +70,16 @@ AZURE_RESOURCE_GROUP_LOCATION="eastus"
 Once we have made the changes to this file, we can `echo` the variables to the prompt using:
 
 ```bash
-./configure-env.sh list [password]
+./configure-env.sh list <password>
 ```
 
 Or export them directly to `~/.bashrc`:
 
 ```bash
-./configure-env.sh write [password]
+./configure-env.sh write <password>
 ```
 
-The value provided for `[password]` is used to log in to the tracking server.
+The value provided for `<password>` is used to log in to the tracking server.
 
 > _**NOTE**_: Due to a bug in MLflow, the `password` cannot contain symbols when using Mlflow with Docker (as described in a future section) as the `password` string is not surrounded in quotes when passed to the container. Unfortunately the [relevant bug](https://github.com/mlflow/mlflow/issues/3381) (and [provided fix](https://github.com/harupy/mlflow/commit/a4f23cfb280477528d9de0a2f1d141ad25687b9d)) never made it into a release.
 
@@ -212,39 +212,219 @@ This:
 
 ### Expose the server
 
-We need to expose the VM on port `443` so that we can access it via `HTTPS`. This can easily be done through azure portal, navigating through: VM -> Networking -> Inbound port rules -> Add inbound port rule
+We need to expose the VM on port `443` so that we can access it via `HTTPS`. This can easily be done through the azure portal, navigating through: VM -> Networking -> Inbound port rules -> Add inbound port rule.
 
 * *image of the networking rules in the dashboard*
 * *image of the rule itself and settings*
 
+Once this route has been exposed, you should be able to access the dashboard through the DNS name configured. In our case the DNS name was configured as `mlflow-tracking.eastus.cloudapp.azure.com`, and so we can access the dashboard at:
+
+https://mlflow-tracking.eastus.cloudapp.azure.com
+
+The login credentials are the values you set using `configure-env.sh`, `MLFLOW_TRACKING_USERNAME`  and `MLFLOW_TRACKING_PASSWORD`.
+
 ## Running our first Model
 
-* grab simple example from mlflow website
-* Talk through instrumenting the code
+We will run through the steps to run a simple model, tracking metrics and artifacts to the mlflow tracking server.
 
+
+### Simple example
+
+The mlflow website provides [a simple example](https://github.com/mlflow/mlflow/blob/master/examples/sklearn_elasticnet_wine/train.py) that demonstrates the logging of parameters and metrics with `log_param` and `log_metric` respectively, but also the storage of artifacts using `log_model`. You can clone the mlflow repository to gain access to this model:
+
+```bash
+git clone https://github.com/mlflow/mlflow.git
+cd examples/sklearn_elasticnet_wine/
+```
+
+```python
+# The data set used in this example is from http://archive.ics.uci.edu/ml/datasets/Wine+Quality
+# P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis.
+# Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553, 2009.
+
+import os
+import warnings
+import sys
+
+import pandas as pd
+import numpy as np
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import ElasticNet
+from urllib.parse import urlparse
+import mlflow
+import mlflow.sklearn
+
+import logging
+
+logging.basicConfig(level=logging.WARN)
+logger = logging.getLogger(__name__)
+
+
+def eval_metrics(actual, pred):
+    rmse = np.sqrt(mean_squared_error(actual, pred))
+    mae = mean_absolute_error(actual, pred)
+    r2 = r2_score(actual, pred)
+    return rmse, mae, r2
+
+
+if __name__ == "__main__":
+    warnings.filterwarnings("ignore")
+    np.random.seed(40)
+
+    # Read the wine-quality csv file from the URL
+    csv_url = (
+        "http://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv"
+    )
+    try:
+        data = pd.read_csv(csv_url, sep=";")
+    except Exception as e:
+        logger.exception(
+            "Unable to download training & test CSV, check your internet connection. Error: %s", e
+        )
+
+    # Split the data into training and test sets. (0.75, 0.25) split.
+    train, test = train_test_split(data)
+
+    # The predicted column is "quality" which is a scalar from [3, 9]
+    train_x = train.drop(["quality"], axis=1)
+    test_x = test.drop(["quality"], axis=1)
+    train_y = train[["quality"]]
+    test_y = test[["quality"]]
+
+    alpha = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
+    l1_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
+
+    with mlflow.start_run():
+        lr = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
+        lr.fit(train_x, train_y)
+
+        predicted_qualities = lr.predict(test_x)
+
+        (rmse, mae, r2) = eval_metrics(test_y, predicted_qualities)
+
+        print("Elasticnet model (alpha=%f, l1_ratio=%f):" % (alpha, l1_ratio))
+        print("  RMSE: %s" % rmse)
+        print("  MAE: %s" % mae)
+        print("  R2: %s" % r2)
+
+        mlflow.log_param("alpha", alpha)
+        mlflow.log_param("l1_ratio", l1_ratio)
+        mlflow.log_metric("rmse", rmse)
+        mlflow.log_metric("r2", r2)
+        mlflow.log_metric("mae", mae)
+
+        tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
+
+        # Model registry does not work with file store
+        if tracking_url_type_store != "file":
+
+            # Register the model
+            # There are other ways to use the Model Registry, which depends on the use case,
+            # please refer to the doc for more information:
+            # https://mlflow.org/docs/latest/model-registry.html#api-workflow
+            mlflow.sklearn.log_model(lr, "model", registered_model_name="ElasticnetWineModel")
+        else:
+            mlflow.sklearn.log_model(lr, "model")
+```
 
 ### Dependencies on the running machine
 
-* python
-* mlflow
-* azure-storage-blob
-* paramiko??
-* env variables
+In our use cases we found that the machine that we run the models from is not the same machine that the mlflow tracking server is running on. A set of dependencies must be configured to permit smooth running of the application.
+
+Note that whilst the mlflow run data is stored remotely in the tracking server, the execution of the model is performed on the local calling machine, wrapped by requests to the tracking server as well as direct interaction with the artifact store. In some cases it may be beneficial to deploy the code to a remote server, especially when leveraging a GPU-enabled machine. This is discussed further in the section on Docker below.
+
+#### Environment Variables
+
+To ensure that we can communicate with the tracking server we must export a set of the environment variables that we created on the tracking VM. This includes:
+
+```bash
+MLFLOW_TRACKING_USERNAME
+MLFLOW_TRACKING_PASSWORD
+AZURE_STORAGE_ACCESS_KEY
+```
+
+We also must set the `MLFLOW_TRACKING_URI` variable to the hostname of our tracking server. We selected the DNS name `mlflow-tracking.eastus.cloudapp.azure.com`, and so the variables would look similar to below, replacing both `<password>` and `<access-key>` with the values retrieved from `configure-env.sh`:
+
+```bash
+MLFLOW_TRACKING_URI="https://mlflow-tracking.eastus.cloudapp.azure.com"
+MLFLOW_TRACKING_USERNAME="admin"
+MLFLOW_TRACKING_PASSWORD="<password>"
+AZURE_STORAGE_ACCESS_KEY="<access-key>"
+```
+
+#### Install dependencies
+
+By default, the running machine is where the mlflow model is deployed, and so Python is required along with a set of packages. This example relies on `scikit-learn`. `azure-storage-blob` is also required as the running machine connects directly with the artifact store to log the model.
+
+Assuming the currently active python environment is the one in which you would like to deploy your model:
+
+```bash
+pip install mlflow scikit-learn azure-storage-blob
+```
+
+#### Running the model
+
+At this point we can run the model by running the script in python. Assuming we are in the `examples/sklearn_elasticnet_wine/` directory, running the following command to train with default parameters:
+
+```bash
+python train.py
+```
+
+Or to specify the values of `<alpha>` and `<l1_ratio>`:
+
+```
+python train.py <alpha> <l1_ratio>
+```
 
 #### Configure Project
 
-To set up a project in mlflow we need to create the MLproject file. This can be used to define operating conditions and
+To set up a project in mlflow we need to create the MLproject file. This can be used to define starting parameters and entrypoints for the different experiments within your project. The simple MLproject example below is similar to the one provided in the `examples/sklearn_elasticnet_wine/` directory, without specifying the conda environment.
 
-Run the model:
+```yaml
+name: tutorial
 
-```bash
-mlflow run ...
+entry_points:
+  main:
+    parameters:
+      alpha: {type: float, default: 0.5}
+      l1_ratio: {type: float, default: 0.1}
+    command: "python train.py {alpha} {l1_ratio}"
 ```
 
+To run the model with the default parameters:
 
+```bash
+mlflow run .
+```
 
+Or to specifiy the parameters:
 
-Note that whilst the MLflow model is stored remotely in the tracking server, the execution of the model is performed on the local calling machine, wrapped by requests to the tracking server as well as direct interaction with the artifact store. In some cases it may be beneficial to deploy the code to a remote server, especially when leveraging a GPU-enabled machine.
+```bash
+mlflow run . -P alpha=<alpha> -P l1_ratio=<l1_ratio>
+```
+
+As our example only consists of a single experiment it is defined as the `main` entrypoint, and is the default. However it is possible to define a different entrypoint for an alternate experiment, lets say for a file defined as `train_new.py` and call this explicitly:
+
+```yaml
+name: tutorial
+
+entry_points:
+  main:
+    parameters:
+      alpha: {type: float, default: 0.5}
+      l1_ratio: {type: float, default: 0.1}
+    command: "python train.py {alpha} {l1_ratio}"
+  train_new:
+      alpha: {type: float, default: 0.5}
+      l1_ratio: {type: float, default: 0.1}
+    command: "python train_new.py {alpha} {l1_ratio}"
+```
+
+```bash
+mlflow run . -e train_new -P alpha=<alpha> -P l1_ratio=<l1_ratio>
+```
+
 
 ### Using Docker for Remote Model Deployment
 
@@ -267,10 +447,3 @@ mlflow run . -A gpus=all
 
 ## Conclusion
 
-
-
-## Notes
-
-* docker-compose
-* paramiko
-* azure-storage-blob
