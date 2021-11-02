@@ -4,17 +4,12 @@ In this blog post we aim to introduce MLflow, deploy on Azure using docker-compo
 
 <ins>***TODO: THIS IS CURRENTLY UNTESTED END-TO-END***</ins>
 
-## Why MLflow
-
-_TODO_
-
 ## Architecture
 
 A typical MLflow deployment consists of the tracking server, a backend store to maintain results, and an artifact store that will contain larger objects from the end of the run.
 
 * **Backend store**: will often be a database of some kind, so long as the URL can be provided as an [SQLAlchemy database URL](https://docs.sqlalchemy.org/en/14/core/engines.html#database-urls)
 * **Artifact store**: contains larger objects and supports many cloud provider solutions (Amazon S3, Azure Blob, ...) as well as alternate remote storage solutions (FTP, NFS, HDFS, ...)
-
 
 
 > _**NOTE**_: In this tutorial we will deploy the MySQL database on the same VM as the tracking server, however in production environments it may be beneficial to deploy the database in a more scalable fashion.
@@ -448,7 +443,7 @@ export DOCKER_HOST="ssh://azureuser@mlflow-training.eastus.cloudapp.azure.com
 
 #### Creating a Dockerfile
 
-To deploy to our model to the GPU-enabled VM, we must first create a docker container. To do this we must leverage CUDA - we used the same version of CUDA that was installed on our VM (11.1.1). We also matched the cudNN package to the version we had installed on the VM. The resulting Dockerfile looked similar to below:
+To deploy to our model to the GPU-enabled VM, we must first create a docker container. To do this we must leverage CUDA - we used the same version of CUDA that was included in the DSVM on our VM (11.1.1). We also matched the cudNN package to the version we had installed from the DSVM. The resulting Dockerfile looked similar to below:
 
 <ins>***TODO: THIS DOCKERFILE IS UNTESTED***</ins>
 
