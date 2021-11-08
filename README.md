@@ -2,8 +2,6 @@
 
 In this blog post we aim to introduce MLflow, deploy on Azure using docker-compose, and run a simple instrumented example model.
 
-<ins>***TODO: THIS IS CURRENTLY UNTESTED END-TO-END***</ins>
-
 ## Architecture
 
 A typical MLflow deployment consists of the tracking server, a backend store to maintain results, and an artifact store that will contain larger objects from the end of the run.
@@ -30,7 +28,9 @@ Firstly we must deploy a VM that our tracking server and MySQL database will run
 
 It is useful to configure the VM with a custom DNS name. It may be necessary to shutdown the VM and detach the network interface temporarily to configure this. In our example we have configured the DNS name as `mlflow-tracking.eastus.cloudapp.azure.com`.
 
-* _image of deployed VM_
+<p align="center">
+    <img src="images/vm.png" alt="Virtual Machine" width="100%"/>
+</p>
 
 ### Configure Environment
 
@@ -58,7 +58,7 @@ MLFLOW_TRACKING_HOSTNAME="mlflow-tracking.eastus.cloudapp.azure.com"
 
 # AZURE
 AZURE_STORAGE_ACCESS_KEY=""
-AZURE_STORAGE_ACCOUNT="mlflowsa"
+AZURE_STORAGE_ACCOUNT="mlflowacc"
 AZURE_STORAGE_CONTAINER="mlflow"
 AZURE_RESOURCE_GROUP="mlflow-rg"
 AZURE_RESOURCE_GROUP_LOCATION="eastus"
@@ -114,9 +114,23 @@ This command will write out the `AZURE_STORAGE_ACCESS_KEY` export command to add
 source ~/.bashrc
 ```
 
+### Set Environment on tracking VM
+
+Some of the configured environment variables are required on the remote tracking VM. To export the same variables to the VM:
+
+```bash
+./configure-env.sh list <password> | ssh azureuser@mlflow-tracking.eastus.cloudapp.azure.com "cat >> ~/.bashrc" -->
+```
+
+Add the value of `AZURE_STORAGE_ACCESS_KEY` also:
+
+```bash
+echo "export AZURE_STORAGE_ACCESS_KEY=<value>" | ssh azureuser@mlflow-tracking.eastus.cloudapp.azure.com "cat >> ~/.bashrc"
+```
+
 ### Install Dependencies
 
-The deployment scripts rely on Docker and Docker Compose and so these must also be installed and configured on the tracking VM.
+The deployment scripts rely on Docker and Docker Compose and so these must also be installed and configured on the tracking VM. SSH into the virtual machine now to run through the following steps.
 
 #### Install Docker
 
@@ -195,6 +209,13 @@ Up to date instructions can be found [here](https://docs.docker.com/compose/inst
 
 Once we have docker running and all of the required environment variables in the shell, we can test deploying the resources. All of the required configuration is provided within the [docker-compose.yaml](https://github.com/adam-cattermole/mlflow-docker-azure/blob/main/docker-compose.yml) file, extracting the values set in the environment.
 
+Clone the repository again (this time on the remote):
+
+```bash
+git clone https://github.com/adam-cattermole/mlflow-docker-azure.git
+cd mlflow-docker-azure
+```
+
 Simply run:
 
 ```bash
@@ -211,12 +232,28 @@ This:
 
 We need to expose the VM on port `443` so that we can access it via `HTTPS`. This can easily be done through the azure portal, navigating through: VM -> Networking -> Inbound port rules -> Add inbound port rule.
 
-* *image of the networking rules in the dashboard*
-* *image of the rule itself and settings*
+<p align="center">
+    <img src="images/networking-rules.png" alt="Networking Rules" width="100%"/>
+</p>
+
+Create the rule exposing TCP for port `443` as required:
+
+<p align="center">
+  <img src="images/add-rule.png" alt="HTTPS Rule" width="40%"/>
+</p>
+
+
+
 
 Once this route has been exposed, you should be able to access the dashboard through the DNS name configured. In our case the DNS name was configured as `mlflow-tracking.eastus.cloudapp.azure.com`, and so we can access the dashboard at:
 
 https://mlflow-tracking.eastus.cloudapp.azure.com
+
+You will hit a login prompt:
+
+<p align="center">
+  <img src="images/login.png" alt="Login" width="40%"/>
+</p>
 
 The login credentials are the values you set using `configure-env.sh` - `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD`.
 
@@ -498,6 +535,3 @@ Mlflow directly calls docker when called with a `docker_env`, and so as we have 
 ```bash
 mlflow run . -A gpus=all
 ```
-
-## Conclusion
-
