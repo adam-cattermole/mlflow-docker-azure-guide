@@ -268,7 +268,7 @@ The mlflow website provides [a simple example](https://github.com/mlflow/mlflow/
 
 ```bash
 git clone https://github.com/mlflow/mlflow.git
-cd examples/sklearn_elasticnet_wine/
+cd mlflow/examples/sklearn_elasticnet_wine/
 ```
 
 ```python
@@ -368,7 +368,7 @@ In our use cases we found that the machine that we run the models from is not th
 
 Note that whilst the mlflow run data is stored remotely in the tracking server, the execution of the model is performed on the local calling machine, wrapped by requests to the tracking server as well as direct interaction with the artifact store. In some cases it may be beneficial to deploy the code to a remote server, especially when leveraging a GPU-enabled machine. This is discussed further in the section on Docker below.
 
-#### Environment Variables
+<!-- #### Environment Variables
 
 To ensure that we can communicate with the tracking server we must export a set of the environment variables that we created on the tracking VM. This includes:
 
@@ -385,7 +385,7 @@ MLFLOW_TRACKING_URI="https://mlflow-tracking.eastus.cloudapp.azure.com"
 MLFLOW_TRACKING_USERNAME="admin"
 MLFLOW_TRACKING_PASSWORD="<password>"
 AZURE_STORAGE_ACCESS_KEY="<access-key>"
-```
+``` -->
 
 #### Install dependencies
 
@@ -413,10 +413,12 @@ python train.py <alpha> <l1_ratio>
 
 #### Configure Project
 
-To set up a project in mlflow we need to create the MLproject file. This can be used to define starting parameters and entrypoints for the different experiments within your project. The simple MLproject example below is similar to the one provided in the `examples/sklearn_elasticnet_wine/` directory, without specifying the conda environment.
+To set up a project in mlflow we need to create the MLproject file. This can be used to define starting parameters and entrypoints for the different experiments within your project, alongside an environment to run within. The simple MLproject example below is provided in the `examples/sklearn_elasticnet_wine/` directory, where a conda environment is specified.
 
 ```yaml
 name: tutorial
+
+conda_env: conda.yaml
 
 entry_points:
   main:
@@ -424,6 +426,22 @@ entry_points:
       alpha: {type: float, default: 0.5}
       l1_ratio: {type: float, default: 0.1}
     command: "python train.py {alpha} {l1_ratio}"
+```
+
+The `conda.yml` file consists of the specification for dependencies:
+
+```yaml
+name: tutorial
+channels:
+  - conda-forge
+dependencies:
+  - python=3.6
+  - pip
+  - pip:
+    - scikit-learn==0.23.2
+    - mlflow>=1.0
+    - pandas
+
 ```
 
 To run the model with the default parameters:
@@ -442,6 +460,8 @@ As our example only consists of a single experiment it is defined as the `main` 
 
 ```yaml
 name: tutorial
+
+conda_env: conda.yaml
 
 entry_points:
   main:
@@ -482,8 +502,6 @@ export DOCKER_HOST="ssh://azureuser@mlflow-training.eastus.cloudapp.azure.com
 
 To deploy to our model to the GPU-enabled VM, we must first create a docker container. To do this we must leverage CUDA - we used the same version of CUDA that was included in the DSVM on our VM (11.1.1). We also matched the cudNN package to the version we had installed from the DSVM. The resulting Dockerfile looked similar to below:
 
-<ins>***TODO: THIS DOCKERFILE IS UNTESTED***</ins>
-
 ```Dockerfile
 FROM nvidia/cuda:11.1.1-cudnn8-runtime-ubuntu20.04
 
@@ -495,6 +513,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y --allow-change-held-packages libcudnn8=8.1.0.77-1+cuda11.2 \
     && rm -rf /var/lib/apt/lists/*
 
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
+
 COPY train.py ./
 
 RUN pip install \
@@ -503,7 +523,7 @@ RUN pip install \
     azure-storage-blob
 ```
 
-We can test that building this image works as intended:
+We can now build the docker image from this file:
 
 ```bash
 docker build -t train:latest .
@@ -513,7 +533,7 @@ This will have built the image on our remote VM!
 
 #### Updating the Configuration
 
-We must update our MLproject file to specify some docker environment options. We point mlflow to our docker image named 'train'. We also provide the `environment` option, telling mlflow to copy the values of `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` into the Docker container.
+We must update our MLproject file to specify some docker environment options instead of the conda environment used prior. We point mlflow to our docker image named 'train'. We also provide the `docker_env.environment` option, telling mlflow to copy the values of `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` into the Docker container.
 
 ```yaml
 name: tutorial
@@ -530,7 +550,7 @@ entry_points:
     command: "python train.py {alpha} {l1_ratio}"
 ```
 
-Mlflow directly calls docker when called with a `docker_env`, and so as we have set `DOCKER_HOST`, the execution will take place on the remote machine. We can therefore run the default experiment with the following command (the `-A gpus=all` ensures the GPU's are passed through to the Docker container):
+Mlflow directly calls docker when specified with a `docker_env`. As we have set `DOCKER_HOST`, the execution will take place on the remote machine. We can therefore run the default experiment with the following command (the `-A gpus=all` ensures the GPU's are passed through to the Docker container):
 
 ```bash
 mlflow run . -A gpus=all
