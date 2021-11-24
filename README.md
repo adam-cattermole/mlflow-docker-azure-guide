@@ -472,6 +472,7 @@ entry_points:
       l1_ratio: {type: float, default: 0.1}
     command: "python train.py {alpha} {l1_ratio}"
   train_new:
+    parameters:
       alpha: {type: float, default: 0.5}
       l1_ratio: {type: float, default: 0.1}
     command: "python train_new.py {alpha} {l1_ratio}"
