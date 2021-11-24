@@ -12,7 +12,9 @@ A typical MLflow deployment consists of the tracking server, a backend store to 
 
 > _**NOTE**_: In this tutorial we will deploy the MySQL database on the same VM as the tracking server, however in production environments it may be beneficial to deploy the database in a more scalable fashion.
 
-* _diagram of mlflow deployed in azure / docker_
+<p align="center">
+    <img src="images/mlflow-architecture.png" alt="Architecture" width="80%"/>
+</p>
 
 ## Deployment
 
